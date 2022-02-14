@@ -11,130 +11,149 @@
 #include <avr/sleep.h>
 #include <stdbool.h>
 
-#define BTN (!(PINB & (1 << PB1)))
+// #define DOT_NUMBER_CHANGED 3
+#define DOT(x) (dots & (1<<x))
+#define SET_DOT(x) do {dots |= (1<<x);} while (0)
+#define UNSET_DOT(x) do {dots &= ~(1<<x);} while (0)
+#define TOGGLE_DOT(x) do {if (DOT(x)) UNSET_DOT(x); else SET_DOT(x);} while (0)
 
-#define NUMBER_CHANGED (dots & (1 << 0)) // leftmost dot for changed number
-#define SET_NUMBER_CHANGED do {dots |= (1 << 0);} while (0)
-#define UNSET_NUMBER_CHANGED do {dots &= ~(1 << 0);} while (0)
+struct {
+    unsigned short channel;
+    bool dmx_sending:1, dmx_receiving:1;
+    unsigned char override_count:2;
+    unsigned short override_value[3];
+} config = {
+    .channel = 1,
+    .dmx_sending = 0,
+    .dmx_receiving = 0,
+    .override_count = 1,
+    .override_value = {255, 255, 255}
+};
 
 const unsigned char plexdelay = 32; //~244Hz = 8MHz/1024/plexdelay
-const unsigned char debouncedelay = 20; //~12Hz
-const unsigned char savedelay = 60; // ~5s 240; //~20s
+const unsigned short debouncedelay = 40; // ~12Hz -> 8MHz/16384/debouncedelay
+const unsigned char fast_flash = 2; // toggle with 6Hz -> ~3Hz
+const unsigned char menu_toggle = 12; // ~1Hz
+// const unsigned char savedelay = 240; //~20s
 
-unsigned short currentNumber = 1;
-unsigned char currentCode[] = {0xff, 0xff, 0xff, 0xff};
-unsigned char dots = 0; // lower 4 bits for dots 0b1230
+volatile unsigned char currentCode[] = {0xff, 0xff, 0xff, 0xff};
+volatile unsigned char dots = 0; // lower 4 bits for dots
 const unsigned char segmentCode[] PROGMEM = {
-//    afbgcpde
-    0b00010100, // 0
-    0b11010111, // 1
-    0b01001100, // 2
-    0b01000101, // 3
-    0b10000111, // 4
-    0b00100101, // 5
-    0b00100100, // 6
-    0b01010111, // 7
-    0b00000100, // 8
-    0b00000101, // 9
+//    edpcgbfa
+    0b00101000, // 0
+    0b11101011, // 1
+    0b00110010, // 2
+    0b10100010, // 3     a
+    0b11100001, // 4   f   b
+    0b10100100, // 5     g
+    0b00100100, // 6   e   c
+    0b11101010, // 7     d  p
+    0b00100000, // 8
+    0b10100000, // 9
     0b11111111, // 10: off
-    0b00000110, // 11: A
+    0b01100000, // 11: A
     0b00111100, // 12: C
-    0b00101100, // 13: E
-    0b00101110, // 14: F
-    0b10000110, // 15: H
-    0b11010101, // 16: J
-    0b10111100, // 17: L
-    0b00001110, // 18: P
-    0b10010100  // 19: U
+    0b00100011, // 13: D
+    0b00110100, // 14: E
+    0b01110100, // 15: F
+    0b01100001, // 16: H
+    0b10101011, // 17: J
+    0b00111101, // 18: L
+    0b01100111, // 19: N
+    0b01110000, // 20: P
+    0b01110111, // 21: R
+    0b00110101, // 22: T
+    0b00101001  // 23: U
 };
+#define LETTER_A 11
+#define LETTER_C 12
+#define LETTER_D 13
+#define LETTER_E 14
+#define LETTER_F 15
+#define LETTER_H 16
+#define LETTER_J 17
+#define LETTER_L 18
+#define LETTER_N 19
+#define LETTER_P 20
+#define LETTER_R 21
+#define LETTER_T 22
+#define LETTER_U 23
 
 ISR(TIMER0_COMPA_vect) {
     static unsigned char activeSegment = 0;
     PORTA = 0b11111111; // disable all segments
-    PORTB |= 0b01111000; // disable all drivers
-    if (activeSegment == 4)
-        activeSegment = 0;
+    PORTB |= 0b00111010; // disable all drivers
     PORTA = currentCode[activeSegment];
-    if (dots & (1 << activeSegment))
-        PORTA &= ~(1 << 2);
-    PORTB &= ~(1 << (activeSegment+3));
-    activeSegment++;
-}
-
-// void doadc() {
-//     TCCR0B = 0;
-//     ADCSRA |= 1<<ADSC; //start conversion, afterwards do button stuff to save time
-//     unsigned char decade, number;
-//         /*decade = PORTA; //use decade to save PORTA
-//     DDRA &= ~(1<<PA2); //make PA2 input
-//     PORTA |= 1<<PA2; //enable pullup on PA2 (where button resides)
-
-//     if( (PINA >> 3 & 1) ^ lastbtnstate ) { //if button and saved state differ
-//         lastbtnstate = !lastbtnstate; //save current state
-//         if( !lastbtnstate ) { //if button was pressed right now, toggle adc
-//             ADMUX ^= 1;
-//             currentChannel = ADMUX & 1;
-//         }
-//     }
-//     PORTA = decade; //restore portb
-//     DDRA = 0b11111100; //make PB0 output again*/
-
-//     while( ADCSRA & (1<<ADSC) ); //wait for conversion to end
-//     unsigned short adc = ADC;
-
-//         if( adc > 1016 ) { //Error threshold
-//           currentCode[0] = segmentCode[11] << 2;
-//           currentCode[1] = segmentCode[11]>> 6 & 1;
-//           currentCode[2] = segmentCode[11] << 2;
-//           currentCode[3] = segmentCode[11]>> 6 & 1;
-//           currentCode[4] = segmentCode[11] << 2;
-//           currentCode[5] = segmentCode[11]>> 6 & 1;
-//         } else
-//           for(decade = 0; decade < 3; decade++) {
-//                   number = 0;
-//                   while( adc >= compareValues[currentChannel][decade] ) {
-//                           number++;
-//                           adc -= compareValues[currentChannel][decade];
-//                   }
-//                   if( decade == 0 && number == 0 )
-//                           number=10; //display nothing instead of zero if U<10V
-//                   currentCode[2*decade] = segmentCode[number] << 2;
-//                   currentCode[2*decade+1] = segmentCode[number] >> 6 & 1; //get bit 6, move it to PB0 (segment g)
-//           }
-
-//     TCCR0B = 5;
-// }
-
-unsigned char save_ctr = 0;
-void save_number() {
-    if (NUMBER_CHANGED) {
-        if (save_ctr > savedelay) {
-            eeprom_update_word(0, currentNumber);
-            UNSET_NUMBER_CHANGED;
-            save_ctr = 0;
-        } else
-            save_ctr++;
+    if (dots & (1 << (3-activeSegment)))
+        PORTA &= ~(1 << 5);
+    if (activeSegment == 3) {
+        PORTB &= ~(1 << PB1);
+        activeSegment = 0;
+    } else {
+        PORTB &= ~(1 << (5-activeSegment));
+        activeSegment++;
     }
 }
 
-void set_digit(unsigned char idx, unsigned char digit) {
-    const unsigned short code = pgm_read_byte(&segmentCode[digit]);
-    switch (idx) {
-        case 0: currentCode[0] = code; break;
-        case 1: currentCode[3] = code; break;
-        case 2: currentCode[2] = code; break;
-        case 3: currentCode[1] = code; break;
+unsigned char menu_toggle_ctr = 0; // set by other functions
+ISR(TIMER1_OVF_vect) { // ~12Hz
+    static unsigned char fast_ctr = 0;
+    fast_ctr++;
+    if (fast_ctr > fast_flash) {
+        if (config.dmx_receiving && !DOT(0))
+            SET_DOT(0);
+        else
+            UNSET_DOT(0);
+        if (config.dmx_sending && !DOT(0))
+            SET_DOT(0);
+        else
+            UNSET_DOT(0);
+        fast_ctr = 0;
+    }
+    TOGGLE_DOT(3);
+    if (menu_toggle_ctr > 0) {
+        menu_toggle_ctr--;
     }
 }
 
-// sets numbers from 0..511 to segments 1..3
+/* Button values:
+    BTN  = 33k/(10k+33k) * 256 = 196 test: 176
+    DOWN = 10k/(10k+10k) * 256 = 128 test: 102
+    UP   = 3k3/(10k+3k3) * 256 = 64  test: 46
+  Add margins:
+    BTN/IDLE:  (196+256)/2 = 226 t: (176+255)/2=215
+    DOWN/BTN:  (128+196)/2 = 162 t: (102+176)/2=144
+    UP/DOWN:    (64+128)/2 = 96  t:  (46+102)/2=74
+*/
+enum btn_state_t {BTN_IDLE, BTN_PUSH, BTN_DOWN, BTN_UP} btn_state = BTN_IDLE;
+enum btn_state_t last_btn_state = BTN_IDLE;
+void handle_menu();
+ISR(ADC_vect) {
+    unsigned char adc = ADCH;
+    if (adc < 74)
+        btn_state = BTN_UP;
+    else if (adc < 144)
+        btn_state = BTN_DOWN;
+    else if (adc < 215)
+        btn_state = BTN_PUSH;
+    else
+        btn_state = BTN_IDLE;
+    handle_menu();
+}
+
+static inline void set_digit(unsigned char idx, unsigned char digit) {
+    currentCode[3-idx] = pgm_read_byte(&segmentCode[digit]);
+}
+
+// sets numbers from 0..999 to segments 1..3
 const unsigned short decadeValues[] PROGMEM = {100, 10, 1};
 void set_number(unsigned short number) {
     unsigned char digit;
     if (number > 999L) {
-        set_digit(1, 13);
-        set_digit(2, 13);
-        set_digit(3, 13);
+        set_digit(1, LETTER_E);
+        set_digit(2, LETTER_E);
+        set_digit(3, LETTER_E);
+        return;
     }
     for (unsigned char decade = 0; decade < 3; decade++) {
         digit = 0;
@@ -149,10 +168,11 @@ void set_number(unsigned short number) {
     }
 }
 
-void poll_button() {
-    static unsigned char lastbtn = 0;
+unsigned char lastbtn = 0;
+bool handle_number(unsigned short* number, unsigned short max) {
     unsigned char increment = 0;
-    if (BTN) {
+    if ((btn_state == BTN_UP && last_btn_state != BTN_DOWN) ||
+        (btn_state == BTN_DOWN && last_btn_state != BTN_UP)) {
         if (lastbtn > 100) {
             increment = 13;
         } else if (lastbtn > 60) {
@@ -164,71 +184,207 @@ void poll_button() {
         } else if (lastbtn == 0) {
             increment = 1;
         }
-        if (increment > 0) {
-            currentNumber += increment;
-            if (currentNumber > 512)
-                currentNumber -= 512;
-            set_number(currentNumber);
-            SET_NUMBER_CHANGED;
-            save_ctr = 0;
-        }
         if (lastbtn < 250)
             lastbtn++;
+
+        if (increment > 0) {
+            if (btn_state == BTN_UP) {
+                *number += increment;
+                if (*number > max)
+                    *number -= max+1    ;
+            } else {
+                if (*number < increment)
+                    *number += max+1;
+                *number -= increment;
+            }
+            // SET_DOT(DOT_NUMBER_CHANGED);
+            // save_ctr = 0;
+            return true;
+        }
     } else
         lastbtn = 0;
+    return false;
 }
+
+enum {menu_channel, menu_override_count, menu_override_value1, menu_override_value2, menu_override_value3, menu_rst, menu_cycle_max} menu_state = menu_channel;
+void handle_menu() {
+    static unsigned char flash_menu_init = 0;
+    unsigned short* override_value;
+
+    if (btn_state == BTN_IDLE && last_btn_state == BTN_PUSH) {
+        menu_state = menu_state + 1;
+        if (menu_state == menu_cycle_max)
+            menu_state = 0;
+        flash_menu_init = 0;
+        menu_toggle_ctr = 0;
+        lastbtn = 0;
+    }
+
+    switch (menu_state) {
+        case menu_channel:
+            set_number(config.channel+1);
+            set_digit(0, LETTER_C);
+            handle_number(&config.channel, 511);
+            break;
+        case menu_override_count:
+            if (btn_state == BTN_UP && last_btn_state == BTN_IDLE) {
+                if (config.override_count < 3)
+                    config.override_count++;
+                else
+                    config.override_count = 1;
+            }
+            if (btn_state == BTN_DOWN && last_btn_state == BTN_IDLE) {
+                if (config.override_count > 1)
+                    config.override_count--;
+                else
+                    config.override_count = 3;
+            }
+
+            set_digit(0, LETTER_N);
+            set_digit(1, LETTER_C);
+            set_digit(2, LETTER_H);
+            set_digit(3, config.override_count);
+            break;
+        case menu_override_value1:
+        case menu_override_value2:
+        case menu_override_value3:
+            override_value = &config.override_value[menu_state-menu_override_value1];
+            switch (flash_menu_init) {
+                case 0:
+                    set_digit(0, LETTER_T);
+                    set_digit(1, 0);
+                    set_digit(2, LETTER_P);
+                    set_digit(3, menu_state-menu_override_value1+1);
+                    menu_toggle_ctr = 2*menu_toggle;
+                    flash_menu_init = 1;
+                    break;
+                case 1:
+                    if (menu_toggle_ctr == 0) {
+                        flash_menu_init = 2;
+                        menu_toggle_ctr = menu_toggle;
+                        set_digit(0, LETTER_T);
+                        set_number(*override_value);
+                    }
+                    break;
+                case 2:
+                    if (menu_toggle_ctr == 0) {
+                        flash_menu_init = 1;
+                        menu_toggle_ctr = menu_toggle;
+                        set_digit(0, menu_state-menu_override_value1+1);
+                        set_number(*override_value);
+                    }
+                    break;
+            };
+            if (handle_number(override_value, 255))
+                set_number(*override_value);
+            break;
+        case menu_rst:
+            if ((btn_state == BTN_UP || btn_state == BTN_DOWN) && last_btn_state == BTN_IDLE) {
+                menu_toggle_ctr = 2*menu_toggle;
+                config.channel = 1;
+                config.override_count = 1;
+                config.override_value[0] = 255;
+                config.override_value[1] = 255;
+                config.override_value[2] = 255;
+            }
+            if (menu_toggle_ctr == 0) {
+                set_digit(0, LETTER_R);
+                set_digit(1, LETTER_E);
+                set_digit(2, 5);
+                set_digit(3, LETTER_T);
+            } else {
+                set_digit(0, LETTER_D);
+                set_digit(1, 0);
+                set_digit(2, LETTER_N);
+                set_digit(3, LETTER_E);
+            }
+            break;
+        default:
+            menu_state = menu_channel;
+    }
+    last_btn_state = btn_state;
+}
+
+// unsigned char save_ctr = 0;
+// void save_number() {
+//     if (DOT(DOT_NUMBER_CHANGED)) {
+//         if (save_ctr > savedelay) {
+//             eeprom_update_word(0, config.channel);
+//             UNSET_DOT(DOT_NUMBER_CHANGED);
+//             save_ctr = 0;
+//         } else
+//             save_ctr++;
+//     }
+// }
 
 int main() {
     DDRA = 0b11111111;
-    DDRB = 0b01111000;
+    DDRB = 0b00111010;
     PORTA = 0b11111111; // disable all segments
-    PORTB = 0b01111010; // disable all anode drivers, pullup on PB1
-    // ADCSRA = 1<<ADEN;
-    // ADMUX = 0;
+    PORTB = 0b00111010; // disable all anode drivers
+    DIDR0 = 0b11111111; // digital input disable adc0..6+aref (PA0..7)
+    DIDR1 = 0b11110000; // digital input disable adc7..10 (PB4..7)
 
+    // ADC to read buttons
+    ADCSRA = (1<<ADEN) | (1<<ADATE) | (1<<ADIE) | (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0); // enable adc + auto trigger + adc interrupt; prescaler 128
+    ADCSRB = (1<<ADTS2) | (1<<ADTS1) | (0<<ADTS0); // trigger adc on timer1 overflow
+    ADMUX = (1<<ADLAR) | 0b1001; // PB6
+
+    // timer0 for segment multiplexing
     OCR0A = plexdelay; // set compare match value
-    TIMSK = (1 << OCIE0A); // enable compare match interrupt
-    TCCR0A = (1 << CTC0); // CTC mode (TOP=OCR0A)
-    TCCR0B = (1 << CS02) | (0 << CS01) | (1 << CS00); // prescaler 1024
+    TCCR0A = 1; // CTC mode (TOP=OCR0A)
+    TCCR0B = (1<<CS02) | (0<<CS01) | (1<<CS00); // prescaler 1024
+    // PORTB &= ~(1 << 1);
 
-    set_digit(0, 12);
-    currentNumber = eeprom_read_word(0);
-    set_number(currentNumber);
+    // timer1 to debounce buttons and handle the ui
+    TC1H = debouncedelay >> 8;
+    OCR1C = debouncedelay & 0xff;
+    TCCR1B = 0b1111; // prescaler 16384
 
+    // i2c/twi slave controlled by stm32
+    // USICR = (1<<USIWM1) | (1<<USIWM0) | (1<<USICS1) | (0<<USICS0) | (1<<USICLK); // TWI mode, external clock
+    usiTwiSlaveInit(0x1A);
+
+    // initialization state
+    set_digit(0, LETTER_H);
+    set_digit(1, LETTER_E);
+    set_digit(2, LETTER_L);
+    set_digit(3, 0);
+
+    TIMSK = (1<<TOIE1) | (1<<OCIE0A); // enable timer 0 compare match interrupt / timer1 overflow interrupt
     sei();
 
-    unsigned char debounce = 0;
+    // unsigned char debounce = 0;
     while(1) {
-        sleep_mode();
-        //if( (currentCode[2*activeSegment+1] & (6-PB3)) && !(DDRA & 1) && wait > adcdelay ) {
-        // if( !(DDRA & 4) ) {
-        //     if( (PINA >> 2 & 1) ^ lastbtnstate ) { //if button and saved state differ
-        //     lastbtnstate = !lastbtnstate; //save current state
-        //     if( lastbtnstate ) { //if button was pressed right now, toggle adc
-        //         ADMUX ^= 1;
-        //         currentChannel = ADMUX & 1;
-        //     }
-        //     }
-        // }
-        if (debounce > debouncedelay) {
-            // poll button each according to debouncedelay
-            poll_button();
+        // sleep_mode();
+        // if (debounce > debouncedelay) {
+        //     // poll button each according to debouncedelay
+        // handle_menu();
+        // PORTA = dots | 0xf0;
 
-            // save to eeprom after some time (savedelay) if number is changed
-            save_number();
+        // sanity checks
+        if (config.channel > 512 || config.channel == 0)
+            config.channel = 1;
+        if (config.override_count > 3 || config.override_count == 0)
+            config.override_count = 1;
 
-            // #define NMAX 19
-            // if (currentNumber == NMAX)
-            //     currentNumber = 0;
-            // else
-            //     currentNumber++;
-            // currentCode[0] = segmentCode[currentNumber];
-            // currentCode[3] = currentNumber == NMAX ? segmentCode[0] : segmentCode[currentNumber+1];
-            // currentCode[2] = currentNumber >= NMAX-1 ? segmentCode[currentNumber+1-NMAX] : segmentCode[currentNumber+2];
-            // currentCode[1] = currentNumber >= NMAX-2 ? segmentCode[currentNumber+2-NMAX] : segmentCode[currentNumber+3];
-            debounce = 0;
-        } else
-            debounce++;
+        //     ADCSRA |= (1 << ADSC);
+
+        //     // save to eeprom after some time (savedelay) if number is changed
+        //     save_number();
+
+        //     // #define NMAX 19
+        //     // if (currentNumber == NMAX)
+        //     //     currentNumber = 0;
+        //     // else
+        //     //     currentNumber++;
+        //     // currentCode[0] = segmentCode[currentNumber];
+        //     // currentCode[3] = currentNumber == NMAX ? segmentCode[0] : segmentCode[currentNumber+1];
+        //     // currentCode[2] = currentNumber >= NMAX-1 ? segmentCode[currentNumber+1-NMAX] : segmentCode[currentNumber+2];
+        //     // currentCode[1] = currentNumber >= NMAX-2 ? segmentCode[currentNumber+2-NMAX] : segmentCode[currentNumber+3];
+        //     // debounce = 0;
+        // } else
+        //     debounce++;
     }
 
     return 0;
