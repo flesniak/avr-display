@@ -64,20 +64,22 @@ void    usiTwiSlaveInit(uint8_t ownAddress);	// send slave address
 
 //#################################################################### variables
 
-#define buffer_size 4						     //in bytes (2..254), change ONLY here!!!!!
+#include "types.h"
+#define buffer_size (sizeof(config_t)) //in bytes (2..254), change ONLY here!!!!!
 
 
-volatile uint8_t rxbuffer[buffer_size];         // Buffer to write data received from the master
-volatile uint8_t txbuffer[buffer_size];			// Transmission buffer to be read from the master
-volatile uint8_t buffer_adr; 					// Virtual buffer address register
+// volatile uint8_t rxbuffer[buffer_size];         // Buffer to write data received from the master
+// volatile uint8_t txbuffer[buffer_size];			// Transmission buffer to be read from the master
+extern uint8_t * const rxbuffer;	// Buffer to write data received from the master
+extern uint8_t * const txbuffer;	// Transmission buffer to be read from the master
+extern volatile uint8_t buffer_adr;	// Virtual buffer address register
 
+// #if 	(buffer_size > 254)
+// 		#error Buffer to big! Maximal 254 Bytes.
 
-#if 	(buffer_size > 254)
-		#error Buffer to big! Maximal 254 Bytes.
-
-#elif 	(buffer_size < 2)
-		#error Buffer to small! mindestens 2 Bytes!
-#endif
+// #elif 	(buffer_size < 2)
+// 		#error Buffer to small! mindestens 2 Bytes!
+// #endif
 
 //##############################################################################
 

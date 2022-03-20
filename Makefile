@@ -1,5 +1,5 @@
 BIN = main
-SRC = main.c
+SRC = main.c usiTwiSlave.c
 # BIN = isrtest
 # SRC = isrtest.c
 
