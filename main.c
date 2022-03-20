@@ -11,30 +11,31 @@
 #include <avr/sleep.h>
 #include <stdbool.h>
 
-// #define DOT_NUMBER_CHANGED 3
+#define DOT_DMX_SEND 3
+#define DOT_DMX_RECV 0
 #define DOT(x) (dots & (1<<x))
 #define SET_DOT(x) do {dots |= (1<<x);} while (0)
 #define UNSET_DOT(x) do {dots &= ~(1<<x);} while (0)
 #define TOGGLE_DOT(x) do {if (DOT(x)) UNSET_DOT(x); else SET_DOT(x);} while (0)
 
-struct {
-    unsigned short channel;
-    bool dmx_sending:1, dmx_receiving:1;
-    unsigned char override_count:2;
-    unsigned short override_value[3];
-} config = {
-    .channel = 1,
+#include "types.h"
+#include "usiTwiSlave.h"
+
+config_t config = {
+    .channel = 0,
     .dmx_sending = 0,
     .dmx_receiving = 0,
     .override_count = 1,
     .override_value = {255, 255, 255}
 };
 
+uint8_t* const rxbuffer = (uint8_t*)&config;
+uint8_t* const txbuffer = (uint8_t*)&config;
+
 const unsigned char plexdelay = 32; //~244Hz = 8MHz/1024/plexdelay
 const unsigned short debouncedelay = 40; // ~12Hz -> 8MHz/16384/debouncedelay
-const unsigned char fast_flash = 2; // toggle with 6Hz -> ~3Hz
+const unsigned char fast_flash = 1; // toggle with 6Hz -> ~3Hz
 const unsigned char menu_toggle = 12; // ~1Hz
-// const unsigned char savedelay = 240; //~20s
 
 volatile unsigned char currentCode[] = {0xff, 0xff, 0xff, 0xff};
 volatile unsigned char dots = 0; // lower 4 bits for dots
@@ -100,17 +101,16 @@ ISR(TIMER1_OVF_vect) { // ~12Hz
     static unsigned char fast_ctr = 0;
     fast_ctr++;
     if (fast_ctr > fast_flash) {
-        if (config.dmx_receiving && !DOT(0))
-            SET_DOT(0);
+        if (config.dmx_receiving && !DOT(DOT_DMX_SEND))
+            SET_DOT(DOT_DMX_SEND);
         else
-            UNSET_DOT(0);
-        if (config.dmx_sending && !DOT(0))
-            SET_DOT(0);
+            UNSET_DOT(DOT_DMX_SEND);
+        if (config.dmx_sending && !DOT(DOT_DMX_RECV))
+            SET_DOT(DOT_DMX_RECV);
         else
-            UNSET_DOT(0);
+            UNSET_DOT(DOT_DMX_RECV);
         fast_ctr = 0;
     }
-    TOGGLE_DOT(3);
     if (menu_toggle_ctr > 0) {
         menu_toggle_ctr--;
     }
@@ -197,8 +197,6 @@ bool handle_number(unsigned short* number, unsigned short max) {
                     *number += max+1;
                 *number -= increment;
             }
-            // SET_DOT(DOT_NUMBER_CHANGED);
-            // save_ctr = 0;
             return true;
         }
     } else
@@ -305,18 +303,6 @@ void handle_menu() {
     last_btn_state = btn_state;
 }
 
-// unsigned char save_ctr = 0;
-// void save_number() {
-//     if (DOT(DOT_NUMBER_CHANGED)) {
-//         if (save_ctr > savedelay) {
-//             eeprom_update_word(0, config.channel);
-//             UNSET_DOT(DOT_NUMBER_CHANGED);
-//             save_ctr = 0;
-//         } else
-//             save_ctr++;
-//     }
-// }
-
 int main() {
     DDRA = 0b11111111;
     DDRB = 0b00111010;
@@ -334,16 +320,14 @@ int main() {
     OCR0A = plexdelay; // set compare match value
     TCCR0A = 1; // CTC mode (TOP=OCR0A)
     TCCR0B = (1<<CS02) | (0<<CS01) | (1<<CS00); // prescaler 1024
-    // PORTB &= ~(1 << 1);
 
     // timer1 to debounce buttons and handle the ui
     TC1H = debouncedelay >> 8;
     OCR1C = debouncedelay & 0xff;
     TCCR1B = 0b1111; // prescaler 16384
 
-    // i2c/twi slave controlled by stm32
-    // USICR = (1<<USIWM1) | (1<<USIWM0) | (1<<USICS1) | (0<<USICS0) | (1<<USICLK); // TWI mode, external clock
-    usiTwiSlaveInit(0x1A);
+    // i2c/twi slave
+    usiTwiSlaveInit(0x1A<<1);
 
     // initialization state
     set_digit(0, LETTER_H);
@@ -354,37 +338,12 @@ int main() {
     TIMSK = (1<<TOIE1) | (1<<OCIE0A); // enable timer 0 compare match interrupt / timer1 overflow interrupt
     sei();
 
-    // unsigned char debounce = 0;
     while(1) {
-        // sleep_mode();
-        // if (debounce > debouncedelay) {
-        //     // poll button each according to debouncedelay
-        // handle_menu();
-        // PORTA = dots | 0xf0;
-
         // sanity checks
-        if (config.channel > 512 || config.channel == 0)
-            config.channel = 1;
+        if (config.channel > 511)
+            config.channel = 0;
         if (config.override_count > 3 || config.override_count == 0)
             config.override_count = 1;
-
-        //     ADCSRA |= (1 << ADSC);
-
-        //     // save to eeprom after some time (savedelay) if number is changed
-        //     save_number();
-
-        //     // #define NMAX 19
-        //     // if (currentNumber == NMAX)
-        //     //     currentNumber = 0;
-        //     // else
-        //     //     currentNumber++;
-        //     // currentCode[0] = segmentCode[currentNumber];
-        //     // currentCode[3] = currentNumber == NMAX ? segmentCode[0] : segmentCode[currentNumber+1];
-        //     // currentCode[2] = currentNumber >= NMAX-1 ? segmentCode[currentNumber+1-NMAX] : segmentCode[currentNumber+2];
-        //     // currentCode[1] = currentNumber >= NMAX-2 ? segmentCode[currentNumber+2-NMAX] : segmentCode[currentNumber+3];
-        //     // debounce = 0;
-        // } else
-        //     debounce++;
     }
 
     return 0;
