@@ -23,6 +23,7 @@
 
 config_t config = {
     .channel = 0,
+    .say_hello = 1,
     .dmx_sending = 0,
     .dmx_receiving = 0,
     .override_count = 1,
@@ -101,11 +102,11 @@ ISR(TIMER1_OVF_vect) { // ~12Hz
     static unsigned char fast_ctr = 0;
     fast_ctr++;
     if (fast_ctr > fast_flash) {
-        if (config.dmx_receiving && !DOT(DOT_DMX_SEND))
+        if (config.dmx_sending && !DOT(DOT_DMX_SEND))
             SET_DOT(DOT_DMX_SEND);
         else
             UNSET_DOT(DOT_DMX_SEND);
-        if (config.dmx_sending && !DOT(DOT_DMX_RECV))
+        if (config.dmx_receiving && !DOT(DOT_DMX_RECV))
             SET_DOT(DOT_DMX_RECV);
         else
             UNSET_DOT(DOT_DMX_RECV);
@@ -218,6 +219,14 @@ void handle_menu() {
         lastbtn = 0;
     }
 
+    if (config.say_hello) {
+        set_digit(0, LETTER_H);
+        set_digit(1, LETTER_E);
+        set_digit(2, LETTER_L);
+        set_digit(3, 0);
+        return;
+    }
+
     switch (menu_state) {
         case menu_channel:
             set_number(config.channel+1);
@@ -328,12 +337,6 @@ int main() {
 
     // i2c/twi slave
     usiTwiSlaveInit(0x1A<<1);
-
-    // initialization state
-    set_digit(0, LETTER_H);
-    set_digit(1, LETTER_E);
-    set_digit(2, LETTER_L);
-    set_digit(3, 0);
 
     TIMSK = (1<<TOIE1) | (1<<OCIE0A); // enable timer 0 compare match interrupt / timer1 overflow interrupt
     sei();

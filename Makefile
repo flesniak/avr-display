@@ -1,5 +1,6 @@
 BIN = main
 SRC = main.c usiTwiSlave.c
+HDR = types.h usiTwiSlave.h
 # BIN = isrtest
 # SRC = isrtest.c
 
@@ -22,8 +23,8 @@ all: $(HEX)
 $(BIN): $(OBJ)
 	avr-gcc $(CFLAGS) -o $(BIN) $^
 
-%.o: %.c
-	avr-gcc $(CFLAGS) -c -o $@ $^
+%.o: %.c $(HDR)
+	avr-gcc $(CFLAGS) -c -o $@ $<
 
 $(HEX): $(BIN)
 	avr-objcopy -O ihex $(BIN) $(HEX)
