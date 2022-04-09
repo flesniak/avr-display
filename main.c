@@ -4,7 +4,6 @@
  * PA0-PA7 - 7-segment-display pin a-h (ACTIVE LOW)
  * PB3-PB6 - 7-segment anode drivers 0-3 */
 
-#include <avr/eeprom.h>
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include <avr/pgmspace.h>
@@ -255,14 +254,14 @@ void handle_menu() {
         case menu_override_value1:
         case menu_override_value2:
         case menu_override_value3:
-            override_value = &config.override_value[menu_state-menu_override_value1];
+            override_value = &config.override_value[menu_state - menu_override_value1];
             switch (flash_menu_init) {
                 case 0:
                     set_digit(0, LETTER_T);
                     set_digit(1, 0);
                     set_digit(2, LETTER_P);
-                    set_digit(3, menu_state-menu_override_value1+1);
-                    menu_toggle_ctr = 2*menu_toggle;
+                    set_digit(3, menu_state - menu_override_value1 + 1);
+                    menu_toggle_ctr = menu_toggle;
                     flash_menu_init = 1;
                     break;
                 case 1:
@@ -277,7 +276,7 @@ void handle_menu() {
                     if (menu_toggle_ctr == 0) {
                         flash_menu_init = 1;
                         menu_toggle_ctr = menu_toggle;
-                        set_digit(0, menu_state-menu_override_value1+1);
+                        set_digit(0, menu_state - menu_override_value1 + 1);
                         set_number(*override_value);
                     }
                     break;
@@ -347,6 +346,9 @@ int main() {
             config.channel = 0;
         if (config.override_count > 3 || config.override_count == 0)
             config.override_count = 1;
+        for (unsigned char i=0; i<3; i++)
+            if (config.override_value[i] > 255)
+                config.override_value[i] = 255;
     }
 
     return 0;
