@@ -287,7 +287,7 @@ void handle_menu() {
         case menu_rst:
             if ((btn_state == BTN_UP || btn_state == BTN_DOWN) && last_btn_state == BTN_IDLE) {
                 menu_toggle_ctr = 2*menu_toggle;
-                config.channel = 1;
+                config.channel = 0;
                 config.override_count = 1;
                 config.override_value[0] = 255;
                 config.override_value[1] = 255;
